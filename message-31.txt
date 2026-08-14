@@ -12810,6 +12810,292 @@ UIS.InputBegan:Connect(function(input, gp)
         end
     end
 end)
+-- =====================================================================
+-- FIX DEFINITIVO: REEMPLAZO DIRECTO DE scanAllPets
+-- =====================================================================
+-- ESTE CÓDIGO VA AL FINAL DE TU SCRIPT
+-- REEMPLAZA LA FUNCIÓN DE ESCANEO DEL HUB POR UNA QUE FUNCIONA
+
+print("[SXE] === APLICANDO FIX DEFINITIVO ===")
+
+-- =====================================================================
+-- NUEVA FUNCIÓN DE ESCANEO (NO usa Synchronizer)
+-- =====================================================================
+scanAllPets = function()
+    local pets = {}
+    local plots = workspace:FindFirstChild("Plots")
+    
+    if not plots then
+        print("[SXE] No se encontró la carpeta Plots")
+        return pets
+    end
+    
+    print("[SXE] Escaneando " .. #plots:GetChildren() .. " plots...")
+    
+    for _, plot in ipairs(plots:GetChildren()) do
+        local podiums = plot:FindFirstChild("AnimalPodiums")
+        if podiums then
+            for _, podium in ipairs(podiums:GetChildren()) do
+                local slot = tonumber(podium.Name)
+                if slot then
+                    for _, desc in ipairs(podium:GetDescendants()) do
+                        if desc:IsA("Model") and desc.Name ~= "Claim" and desc.Name ~= "Base" and desc.Name ~= "Decorations" then
+                            local ok, cf = pcall(function() return desc:GetBoundingBox() end)
+                            if ok and cf then
+                                table.insert(pets, {
+                                    name = desc.Name,
+                                    mps = 0,
+                                    mutation = "None",
+                                    position = cf.Position,
+                                    plot = plot.Name,
+                                    slot = tostring(slot),
+                                    model = desc,
+                                    uid = plot.Name .. "_" .. tostring(slot),
+                                    genText = "$0/s",
+                                    genValue = 0,
+                                })
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    print("[SXE] Encontrados " .. #pets .. " animales")
+    return pets
+end
+
+-- =====================================================================
+-- NUEVA FUNCIÓN getTargetPetData (usa priorityList del hub)
+-- =====================================================================
+local origGetTargetPetData = getTargetPetData
+
+getTargetPetData = function()
+    local pets = scanAllPets()
+    
+    if #pets == 0 then
+        print("[SXE] No se encontraron mascotas")
+        return nil
+    end
+    
+    -- Buscar por prioridad usando priorityList
+    if priorityList and #priorityList > 0 then
+        for _, pName in ipairs(priorityList) do
+            local searchName = pName:lower()
+            for _, pet in ipairs(pets) do
+                if pet.name and pet.name:lower():find(searchName, 1, true) then
+                    print("[SXE] Prioridad encontrada: " .. pet.name)
+                    return pet
+                end
+            end
+        end
+    end
+    
+    print("[SXE] Usando primera mascota: " .. pets[1].name)
+    return pets[1]
+end
+
+-- =====================================================================
+-- NUEVA FUNCIÓN getPetPosition
+-- =====================================================================
+getPetPosition = function(plot, slot)
+    local plotInst = workspace:FindFirstChild("Plots") and workspace.Plots:FindFirstChild(plot.Name)
+    if plotInst then
+        local podiums = plotInst:FindFirstChild("AnimalPodiums")
+        if podiums then
+            local podium = podiums:FindFirstChild(tostring(slot))
+            if podium then
+                for _, desc in ipairs(podium:GetDescendants()) do
+                    if desc:IsA("Model") and desc.Name ~= "Claim" and desc.Name ~= "Base" and desc.Name ~= "Decorations" then
+                        local ok, cf = pcall(function() return desc:GetBoundingBox() end)
+                        if ok and cf then
+                            return cf.Position
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- =====================================================================
+-- NUEVA FUNCIÓN findAdorneeGlobal
+-- =====================================================================
+findAdorneeGlobal = function(animalData)
+    if not animalData then return nil end
+    
+    if animalData.model and animalData.model.Parent then
+        return animalData.model.PrimaryPart or animalData.model
+    end
+    
+    local plot = workspace:FindFirstChild("Plots") and workspace.Plots:FindFirstChild(animalData.plot)
+    if plot then
+        local podiums = plot:FindFirstChild("AnimalPodiums")
+        if podiums then
+            local podium = podiums:FindFirstChild(animalData.slot)
+            if podium then
+                for _, desc in ipairs(podium:GetDescendants()) do
+                    if desc:IsA("Model") and desc.Name ~= "Claim" and desc.Name ~= "Base" and desc.Name ~= "Decorations" then
+                        return desc.PrimaryPart or desc
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- =====================================================================
+-- NUEVA FUNCIÓN doVelocityTP (TP que funciona)
+-- =====================================================================
+doVelocityTP = function()
+    print("[SXE] === EJECUTANDO TP ===")
+    
+    local char = LocalPlayer.Character
+    if not char then
+        print("[SXE] No hay personaje")
+        return
+    end
+    
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        print("[SXE] No hay HumanoidRootPart")
+        return
+    end
+    
+    local pet = getTargetPetData()
+    if not pet or not pet.position then
+        print("[SXE] No se encontró mascota objetivo")
+        return
+    end
+    
+    print("[SXE] TP a: " .. pet.name)
+    
+    local targetPos = pet.position + Vector3.new(0, 4, 0)
+    local startCF = hrp.CFrame
+    local targetCF = CFrame.new(targetPos)
+    local duration = 0.3
+    local startTime = os.clock()
+    
+    -- Desactivar colisiones
+    pcall(function()
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end)
+    
+    -- TP suave
+    while os.clock() - startTime < duration do
+        if not hrp.Parent then break end
+        local t = (os.clock() - startTime) / duration
+        hrp.CFrame = startCF:Lerp(targetCF, t * t * (3 - 2 * t))
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        RunService.Heartbeat:Wait()
+    end
+    
+    hrp.CFrame = targetCF
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    hrp.AssemblyAngularVelocity = Vector3.zero
+    
+    -- Reactivar colisiones
+    pcall(function()
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
+    end)
+    
+    print("[SXE] TP completado a " .. pet.name)
+end
+
+-- =====================================================================
+-- ACTUALIZAR REFERENCIAS GLOBALES
+-- =====================================================================
+_G.SXEStartSideTP = doVelocityTP
+_G.SXE_ExecuteManualTP = function()
+    task.spawn(doVelocityTP)
+end
+doGrabbleVelocityTP = doVelocityTP
+runAutoSnipe = doVelocityTP
+
+-- =====================================================================
+-- TP DE EMERGENCIA (Alt+T)
+-- =====================================================================
+local function EmergencyTP()
+    print("[SXE] === TP DE EMERGENCIA ===")
+    local pets = scanAllPets()
+    if #pets == 0 then
+        print("[SXE] No hay animales")
+        return
+    end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local pet = pets[1]
+    print("[SXE] TP de emergencia a " .. pet.name)
+    
+    hrp.CFrame = CFrame.new(pet.position + Vector3.new(0, 4, 0))
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    hrp.AssemblyAngularVelocity = Vector3.zero
+end
+
+-- =====================================================================
+-- KEYBINDS
+-- =====================================================================
+UIS.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    
+    if input.KeyCode == Enum.KeyCode.T then
+        if UIS:IsKeyDown(Enum.KeyCode.LeftAlt) then
+            task.spawn(EmergencyTP)
+        else
+            task.spawn(doVelocityTP)
+        end
+    end
+end)
+
+-- =====================================================================
+-- TP ON LOAD (si está activado en Config)
+-- =====================================================================
+task.spawn(function()
+    print("[SXE] Esperando 5 segundos para carga inicial...")
+    task.wait(5)
+    
+    local pets = scanAllPets()
+    if #pets > 0 then
+        print("[SXE] Carga inicial: " .. #pets .. " animales")
+        
+        if Config and Config.TpSettings and Config.TpSettings.TpOnLoad then
+            print("[SXE] TP on load activado - ejecutando...")
+            task.wait(1)
+            doVelocityTP()
+        end
+    else
+        print("[SXE] No se encontraron animales - reintentando...")
+        for i = 1, 5 do
+            task.wait(2)
+            pets = scanAllPets()
+            if #pets > 0 then
+                print("[SXE] Encontrados " .. #pets .. " animales en intento " .. i)
+                if Config and Config.TpSettings and Config.TpSettings.TpOnLoad then
+                    doVelocityTP()
+                end
+                break
+            end
+        end
+    end
+end)
 
 -- =====================================================================
 -- COMANDOS DE CONSOLA
@@ -12817,28 +13103,18 @@ end)
 _G.SXE_FIX = {
     tp = doVelocityTP,
     emergency = EmergencyTP,
-    scan = scanPlotsDirect,
+    scan = scanAllPets,
     status = function()
-        local pets = scanPlotsDirect()
+        local pets = scanAllPets()
         print("=== SXE STATUS ===")
         print("Animales: " .. #pets)
-        if #pets > 0 then print("Primero: " .. pets[1].name) end
+        if #pets > 0 then
+            print("Primero: " .. pets[1].name)
+            print("Posición: " .. tostring(pets[1].position))
+        end
     end,
 }
 
--- =====================================================================
--- ESCANEO INICIAL
--- =====================================================================
-task.spawn(function()
-    task.wait(5)
-    local pets = scanPlotsDirect()
-    SXEPatchLog("Carga inicial: " .. #pets .. " animales")
-    if Config and Config.TpSettings and Config.TpSettings.TpOnLoad and #pets > 0 then
-        task.wait(1)
-        doVelocityTP()
-    end
-end)
-
-SXEPatchLog("=== PATCH COMPLETADO ===")
-SXEPatchLog("Todas las funciones del hub funcionan normalmente")
-SXEPatchLog("Usa T para TP, Alt+T para emergencia")
+print("[SXE] === FIX APLICADO CORRECTAMENTE ===")
+print("[SXE] Todas las funciones del hub funcionan normal")
+print("[SXE] Usa T para TP, Alt+T para emergencia")
